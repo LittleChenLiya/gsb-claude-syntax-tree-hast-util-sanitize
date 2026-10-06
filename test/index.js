@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import deepmerge from 'deepmerge'
 import {h, s} from 'hastscript'
-import {defaultSchema, sanitize} from 'hast-util-sanitize'
+import {defaultSchema, sanitize, sanitizeSvg} from 'hast-util-sanitize'
 import {toHtml} from 'hast-util-to-html'
 import {u} from 'unist-builder'
 
@@ -40,7 +40,8 @@ test('sanitize()', async function (t) {
   await t.test('should expose the public api', async function () {
     assert.deepEqual(Object.keys(await import('hast-util-sanitize')).sort(), [
       'defaultSchema',
-      'sanitize'
+      'sanitize',
+      'sanitizeSvg'
     ])
   })
 
@@ -851,6 +852,113 @@ test('`root`', async function (t) {
       )
     }
   )
+})
+
+test('`svg`', async function (t) {
+  const schema = deepmerge(defaultSchema, {
+    tagNames: ['svg', 'circle', 'foreignObject', 'text'],
+    svgAttributes: {
+      svg: ['viewBox'],
+      circle: ['cx', 'cy', 'r'],
+      a: ['href'],
+      '*': ['fill']
+    }
+  })
+
+  // Small fixture tree: an SVG image with a shape, links, and embedded HTML.
+  const tree = s('svg', {onLoad: 'alert(1)', viewBox: '0 0 10 10'}, [
+    s('circle', {cx: 5, cy: 5, fill: 'red', r: 4, title: 'circle'}),
+    s('a', {href: 'javascript:alert(1)'}, [s('text', 'danger')]),
+    s('a', {href: 'https://example.com'}, [s('text', 'safe')]),
+    s('foreignObject', [
+      h('div', {fill: 'red', onClick: 'alert(1)', title: 'note'}, 'hello')
+    ])
+  ])
+
+  await t.test(
+    'should allow SVG properties in the SVG namespace',
+    async function () {
+      assert.deepEqual(
+        sanitizeSvg(tree, schema),
+        s('svg', {viewBox: '0 0 10 10'}, [
+          s('circle', {cx: 5, cy: 5, fill: 'red', r: 4}),
+          s('a', [s('text', 'danger')]),
+          s('a', {href: 'https://example.com'}, [s('text', 'safe')]),
+          s('foreignObject', [h('div', {title: 'note'}, 'hello')])
+        ])
+      )
+    }
+  )
+
+  await t.test(
+    'should use HTML rules for same-named properties in `foreignObject`',
+    async function () {
+      // `title` is allowed on all HTML elements but not in `svgAttributes`,
+      // `fill` is allowed on all SVG elements but not in `attributes`.
+      assert.deepEqual(
+        sanitizeSvg(
+          s('svg', [
+            s('circle', {fill: 'red', title: 'circle'}),
+            s('foreignObject', [h('div', {fill: 'red', title: 'note'})])
+          ]),
+          schema
+        ),
+        s('svg', [
+          s('circle', {fill: 'red'}),
+          s('foreignObject', [h('div', {title: 'note'})])
+        ])
+      )
+    }
+  )
+
+  await t.test(
+    'should clean dangerous URLs in the SVG namespace',
+    async function () {
+      assert.deepEqual(
+        sanitizeSvg(
+          s('svg', [
+            s('a', {href: 'javascript:alert(1)'}, [s('text', 'danger')]),
+            s('a', {href: 'https://example.com'}, [s('text', 'safe')])
+          ]),
+          schema
+        ),
+        s('svg', [
+          s('a', [s('text', 'danger')]),
+          s('a', {href: 'https://example.com'}, [s('text', 'safe')])
+        ])
+      )
+    }
+  )
+
+  await t.test(
+    'should start the default `sanitize` entry in the HTML namespace',
+    async function () {
+      // `title` is allowed by the HTML rules, `fill` and `viewBox` are not.
+      assert.deepEqual(
+        sanitize(s('circle', {fill: 'red', title: 'a'}), schema),
+        s('circle', {title: 'a'})
+      )
+    }
+  )
+
+  await t.test(
+    'should strip `svg` with the default schema, as before',
+    async function () {
+      assert.deepEqual(sanitize(s('svg', [s('circle')])), {
+        type: 'root',
+        children: []
+      })
+    }
+  )
+
+  await t.test('should not mutate the input tree', async function () {
+    const before = structuredClone(tree)
+
+    sanitizeSvg(tree, schema)
+    sanitize(tree, schema)
+
+    assert.deepEqual(tree, before)
+  })
 })
 
 // Simple value to see if `toString` is called.

@@ -19,6 +19,7 @@
 * [API](#api)
   * [`defaultSchema`](#defaultschema)
   * [`sanitize(tree[, options])`](#sanitizetree-options)
+  * [`sanitizeSvg(tree[, options])`](#sanitizesvgtree-options)
   * [`Schema`](#schema)
 * [Types](#types)
 * [Compatibility](#compatibility)
@@ -116,8 +117,8 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers [`defaultSchema`][api-default-schema],
+[`sanitize`][api-sanitize], and [`sanitizeSvg`][api-sanitize-svg].
 There is no default export.
 
 ### `defaultSchema`
@@ -128,7 +129,78 @@ Follows [GitHub][] style sanitation.
 
 ### `sanitize(tree[, options])`
 
-Sanitize a tree.
+Sanitize a tree, starting in the HTML namespace.
+
+###### Parameters
+
+* `tree` ([`Node`][node])
+  — unsafe tree
+* `options` ([`Schema`][api-schema], default:
+  [`defaultSchema`][api-default-schema])
+  — configuration
+
+###### Returns
+
+New, safe tree ([`Node`][node]).
+
+### `sanitizeSvg(tree[, options])`
+
+Sanitize a tree, starting in the SVG namespace.
+
+Elements in the SVG namespace are checked against
+[`schema.svgAttributes`][api-svg-attributes] instead of
+`schema.attributes`.
+The content of `foreignObject` switches back to the HTML namespace and its
+rules.
+URLs are checked against `schema.protocols` in both namespaces.
+
+For example:
+
+```js
+import deepmerge from 'deepmerge'
+import {h, s} from 'hastscript'
+import {defaultSchema, sanitizeSvg} from 'hast-util-sanitize'
+
+const schema = deepmerge(defaultSchema, {
+  tagNames: ['svg', 'circle', 'foreignObject', 'text'],
+  svgAttributes: {
+    svg: ['viewBox'],
+    circle: ['cx', 'cy', 'r'],
+    a: ['href'],
+    '*': ['fill']
+  }
+})
+
+const tree = s('svg', {onLoad: 'alert(1)', viewBox: '0 0 10 10'}, [
+  s('circle', {cx: 5, cy: 5, fill: 'red', r: 4, title: 'circle'}),
+  s('a', {href: 'javascript:alert(1)'}, [s('text', 'danger')]),
+  s('a', {href: 'https://example.com'}, [s('text', 'safe')]),
+  s('foreignObject', [h('div', {title: 'note'}, 'hello')])
+])
+
+console.log(sanitizeSvg(tree, schema))
+```
+
+Yields:
+
+```js
+{
+  type: 'element',
+  tagName: 'svg',
+  properties: {viewBox: '0 0 10 10'},
+  children: [
+    // `title` is dropped: it is not allowed in the SVG namespace.
+    {type: 'element', tagName: 'circle', properties: {cx: 5, cy: 5, fill: 'red', r: 4}, children: []},
+    // `javascript:` URLs are dropped.
+    {type: 'element', tagName: 'a', properties: {}, children: [{type: 'element', tagName: 'text', properties: {}, children: [{type: 'text', value: 'danger'}]}]},
+    {type: 'element', tagName: 'a', properties: {href: 'https://example.com'}, children: [{type: 'element', tagName: 'text', properties: {}, children: [{type: 'text', value: 'safe'}]}]},
+    // `title` is kept: HTML rules apply inside `foreignObject`.
+    {type: 'element', tagName: 'foreignObject', properties: {}, children: [
+      {type: 'element', tagName: 'div', properties: {title: 'note'}, children: [{type: 'text', value: 'hello'}]}
+    ]}
+  ]
+}
+```
 
 ###### Parameters
 
@@ -326,6 +398,29 @@ required: {
 > That means properties could be removed by `attributes` and then added
 > again with `required`.
 
+###### `svgAttributes`
+
+Map of tag names to allowed [property names][name] for elements in the SVG
+namespace (`Record<string, Array<[string, ...Array<RegExp | boolean | number | string>] | string>`,
+default: `defaultSchema.svgAttributes`).
+
+This is used instead of [`attributes`][api-attributes] for elements that live
+in the SVG namespace, such as `svg` itself and its descendants, except that
+`foreignObject` switches its content back to the HTML namespace.
+
+The special key `'*'` as a tag name defines property names allowed on all SVG
+elements.
+
+For example:
+
+```js
+svgAttributes: {
+  circle: ['cx', 'cy', 'r'],
+  // …
+  '*': ['fill', 'viewBox']
+}
+```
+
 ###### `strip`
 
 List of tag names to strip from the tree (`Array<string>`, default:
@@ -465,6 +560,12 @@ abide by its terms.
 
 [api-default-schema]: #defaultschema
 
+[api-attributes]: #attributes
+
 [api-sanitize]: #sanitizetree-options
 
+[api-sanitize-svg]: #sanitizesvgtree-options
+
 [api-schema]: #schema
+
+[api-svg-attributes]: #svgattributes
