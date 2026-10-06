@@ -116,8 +116,9 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers [`defaultSchema`][api-default-schema],
+[`sanitize`][api-sanitize],
+and [`sanitizeSvg`][api-sanitize-svg].
 There is no default export.
 
 ### `defaultSchema`
@@ -136,6 +137,29 @@ Sanitize a tree.
   — unsafe tree
 * `options` ([`Schema`][api-schema], default:
   [`defaultSchema`][api-default-schema])
+  — configuration
+
+###### Returns
+
+New, safe tree ([`Node`][node]).
+
+### `sanitizeSvg(tree[, options])`
+
+Sanitize a tree, with support for SVG.
+
+Works like [`sanitize`][api-sanitize], but elements in an `svg` subtree are
+checked against the SVG schema (`svgAttributes`), and elements inside a
+`foreignObject` switch back to the normal HTML rules.
+Which attributes are allowed is decided by the actual namespace of each
+element in the tree.
+URI values go through the same protocol checks as `sanitize`.
+
+###### Parameters
+
+* `tree` ([`Node`][node])
+  — unsafe tree
+* `options` ([`Schema`][api-schema], default:
+  [`defaultSchema`][api-default-schema] plus the SVG schema)
   — configuration
 
 ###### Returns
@@ -341,6 +365,18 @@ For example:
 strip: ['script']
 ```
 
+###### `svgAttributes`
+
+Map of tag names to allowed property names, used for elements in the SVG
+namespace instead of `attributes` (`Record<string, Array<string>>`, default:
+`undefined`).
+
+When defined (as done by [`sanitizeSvg`][api-sanitize-svg]), elements in an
+`svg` subtree are checked against these rules, while elements inside a
+`foreignObject` switch back to the normal HTML `attributes` rules.
+
+When not defined, `attributes` is used for all elements.
+
 ###### `tagNames`
 
 List of allowed tag names (`Array<string>`, default: `defaultSchema.tagNames`).
@@ -466,5 +502,7 @@ abide by its terms.
 [api-default-schema]: #defaultschema
 
 [api-sanitize]: #sanitizetree-options
+
+[api-sanitize-svg]: #sanitizesvgtree-options
 
 [api-schema]: #schema
