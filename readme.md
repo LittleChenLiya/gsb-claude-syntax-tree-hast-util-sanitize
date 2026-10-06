@@ -17,6 +17,7 @@
 * [Install](#install)
 * [Use](#use)
 * [API](#api)
+  * [`checkReferences(tree[, options])`](#checkreferencestree-options)
   * [`defaultSchema`](#defaultschema)
   * [`sanitize(tree[, options])`](#sanitizetree-options)
   * [`Schema`](#schema)
@@ -116,9 +117,96 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers
+[`checkReferences`][api-check-references],
+[`defaultSchema`][api-default-schema],
+and [`sanitize`][api-sanitize].
 There is no default export.
+
+### `checkReferences(tree[, options])`
+
+Check `id` references (ARIA properties such as `ariaDescribedBy` and URL
+fragments such as `href="#id"`) against the identifiers that actually exist
+in a tree.
+
+This is meant to be used on the result of [`sanitize`][api-sanitize]: it
+looks at the current (safe) tree as plain data, so references whose target
+was removed by sanitation are reported as missing instead of being treated
+as still valid.
+It does not re-run `sanitize` and does not mutate the tree unless
+`options.mode` is `'trim'`.
+
+For example, given four nodes — a kept target, a stripped target, a
+multi-value `ariaDescribedBy` reference, and a fragment reference:
+
+```js
+import {checkReferences, sanitize} from 'hast-util-sanitize'
+
+const safe = sanitize(
+  {
+    type: 'root',
+    children: [
+      {
+        type: 'element',
+        tagName: 'section',
+        properties: {id: 'intro'},
+        children: []
+      },
+      {
+        type: 'element',
+        tagName: 'script',
+        properties: {id: 'gone'},
+        children: []
+      },
+      {
+        type: 'element',
+        tagName: 'p',
+        properties: {ariaDescribedBy: ['intro', 'gone', 'never']},
+        children: [{type: 'text', value: 'hi'}]
+      },
+      {
+        type: 'element',
+        tagName: 'a',
+        properties: {href: '#intro'},
+        children: [{type: 'text', value: 'link'}]
+      }
+    ]
+  },
+  {
+    attributes: {'*': ['id', 'href', 'ariaDescribedBy']},
+    clobber: [],
+    strip: ['script'],
+    tagNames: ['a', 'p', 'section']
+  }
+)
+
+// The `script` node was stripped, so `gone` no longer exists.
+const report = checkReferences(safe)
+
+console.log(report.missing.map((d) => [d.property, d.id, d.index]))
+// => [['ariaDescribedBy', 'gone', 1], ['ariaDescribedBy', 'never', 2]]
+```
+
+###### Parameters
+
+* `tree` ([`Node`][node])
+  — tree to check (typically the result of [`sanitize`][api-sanitize])
+* `options.mode` (`'report'` or `'trim'`, default: `'report'`)
+  — with `'report'`, only report problems; with `'trim'`, also remove
+  invalid identifiers from multi-value properties (valid identifiers are
+  kept, in their original order) and remove single-value properties that
+  only hold an invalid reference
+
+###### Returns
+
+Report of problems (`{missing, duplicate, ambiguous}`):
+
+* `missing` (`Array<{node, property, id, index}>`)
+  — references whose target identifier does not exist in the tree
+* `duplicate` (`Array<{id, nodes}>`)
+  — identifiers defined by more than one element
+* `ambiguous` (`Array<{node, property, id, index}>`)
+  — references whose target identifier is defined more than once
 
 ### `defaultSchema`
 
@@ -360,7 +448,8 @@ tagNames: [
 ## Types
 
 This package is fully typed with [TypeScript][].
-It exports the additional type [`Schema`][api-schema].
+It exports the additional types `CheckReferencesOptions`, `DuplicateId`,
+`ReferenceIssue`, `ReferenceReport`, and [`Schema`][api-schema].
 
 ## Compatibility
 
@@ -464,6 +553,8 @@ abide by its terms.
 [rehype-sanitize]: https://github.com/rehypejs/rehype-sanitize
 
 [api-default-schema]: #defaultschema
+
+[api-check-references]: #checkreferencestree-options
 
 [api-sanitize]: #sanitizetree-options
 
