@@ -39,6 +39,7 @@ test('sanitize()', async function (t) {
 
   await t.test('should expose the public api', async function () {
     assert.deepEqual(Object.keys(await import('hast-util-sanitize')).sort(), [
+      'checkReferences',
       'defaultSchema',
       'sanitize'
     ])
@@ -356,6 +357,7 @@ test('`element`', async function (t) {
       sanitize({
         type: 'element',
         tagName: 'img',
+        // @ts-expect-error: check how `null` is handled.
         properties: {alt: null},
         children: []
       }),

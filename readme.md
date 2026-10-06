@@ -17,8 +17,11 @@
 * [Install](#install)
 * [Use](#use)
 * [API](#api)
+  * [`checkReferences`](#checkreferencestree-options)
   * [`defaultSchema`](#defaultschema)
   * [`sanitize(tree[, options])`](#sanitizetree-options)
+  * [`Options`](#options)
+  * [`Reference`](#reference)
   * [`Schema`](#schema)
 * [Types](#types)
 * [Compatibility](#compatibility)
@@ -116,9 +119,30 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers [`checkReferences`][api-check-references],
+[`defaultSchema`][api-default-schema], and [`sanitize`][api-sanitize].
 There is no default export.
+
+### `checkReferences(tree[, options])`
+
+Check references in a sanitized tree.
+
+Walks a tree that was sanitized and checks that the remaining `id`s are
+referenced by ARIA attributes and fragment URLs.
+References that point to no target (`missing`) or to more than one target
+(`duplicate`) are reported.
+Optionally removes invalid references.
+
+###### Parameters
+
+* `tree` ([`Node`][node])
+  — sanitized tree
+* `options` (`Options`, optional)
+  — configuration
+
+###### Returns
+
+Invalid references ([`Array<Reference>`][api-reference]).
 
 ### `defaultSchema`
 
@@ -141,6 +165,52 @@ Sanitize a tree.
 ###### Returns
 
 New, safe tree ([`Node`][node]).
+
+### `Options`
+
+Configuration for `checkReferences`.
+
+###### Fields
+
+###### `remove`
+
+Remove invalid references from the tree (`boolean`, default: `false`).
+
+###### `schema`
+
+Schema that was used to sanitize ([`Schema`][api-schema], default:
+[`defaultSchema`][api-default-schema]).
+
+### `Reference`
+
+A reference that is not valid.
+
+###### Fields
+
+###### `kind`
+
+Kind of problem (`'duplicate' | 'missing'`).
+
+* `'duplicate'`: more than one element has the referenced id.
+* `'missing'`: no element has the referenced id.
+
+###### `node`
+
+Element that references ([`Element`][element]).
+
+###### `property`
+
+Property on `node` that references (`string`, for example
+`ariaDescribedBy`, `href`).
+
+###### `value`
+
+Value that is not valid (`string`).
+
+###### `targets`
+
+Elements that have the referenced id
+([`Array<Element>`][element], empty for missing, two or more for duplicate).
 
 ### `Schema`
 
@@ -455,6 +525,8 @@ abide by its terms.
 
 [node]: https://github.com/syntax-tree/hast#nodes
 
+[element]: https://github.com/syntax-tree/hast#element
+
 [name]: https://github.com/syntax-tree/hast#propertyname
 
 [github]: https://github.com/gjtorikian/html-pipeline/blob/a2e02ac/lib/html_pipeline/sanitization_filter.rb
@@ -463,8 +535,12 @@ abide by its terms.
 
 [rehype-sanitize]: https://github.com/rehypejs/rehype-sanitize
 
+[api-check-references]: #checkreferencestree-options
+
 [api-default-schema]: #defaultschema
 
 [api-sanitize]: #sanitizetree-options
+
+[api-reference]: #reference
 
 [api-schema]: #schema
