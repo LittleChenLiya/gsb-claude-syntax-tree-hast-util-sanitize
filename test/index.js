@@ -40,7 +40,8 @@ test('sanitize()', async function (t) {
   await t.test('should expose the public api', async function () {
     assert.deepEqual(Object.keys(await import('hast-util-sanitize')).sort(), [
       'defaultSchema',
-      'sanitize'
+      'sanitize',
+      'tightenSchema'
     ])
   })
 

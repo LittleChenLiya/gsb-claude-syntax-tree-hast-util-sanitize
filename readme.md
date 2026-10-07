@@ -19,6 +19,7 @@
 * [API](#api)
   * [`defaultSchema`](#defaultschema)
   * [`sanitize(tree[, options])`](#sanitizetree-options)
+  * [`tightenSchema(base, tightening)`](#tightenschemabase-tightening)
   * [`Schema`](#schema)
 * [Types](#types)
 * [Compatibility](#compatibility)
@@ -116,8 +117,8 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers [`defaultSchema`][api-default-schema],
+[`sanitize`][api-sanitize], and [`tightenSchema`][api-tighten-schema].
 There is no default export.
 
 ### `defaultSchema`
@@ -141,6 +142,49 @@ Sanitize a tree.
 ###### Returns
 
 New, safe tree ([`Node`][node]).
+
+### `tightenSchema(base, tightening)`
+
+Combine two schemas into a tighter one.
+
+The result never allows more than `base`: tag names, attributes, and
+protocols are intersected, so `tightening` can only narrow what `base`
+allows and can never re-allow things that `base` forbids.
+Fixed value allow lists in attribute definitions (such as
+`['type', 'checkbox', 'radio']`) are intersected too.
+Conflicts that cannot be expressed as a schema (such as two fixed value
+lists that do not overlap, or two different regular expressions for one
+attribute) are rejected by throwing an error.
+
+Fields that `tightening` does not mention are copied from `base`.
+The result can be passed to [`sanitize`][api-sanitize] like any other schema.
+
+###### Parameters
+
+* `base` ([`Schema`][api-schema])
+  — base schema
+* `tightening` ([`Schema`][api-schema])
+  — schema that may only narrow `base`
+
+###### Returns
+
+New schema that is never wider than `base` ([`Schema`][api-schema]).
+
+###### Example
+
+```js
+import {defaultSchema, sanitize, tightenSchema} from 'hast-util-sanitize'
+
+const schema = tightenSchema(defaultSchema, {
+  tagNames: ['a', 'b', 'p'],
+  attributes: {a: ['href']},
+  protocols: {href: ['https']}
+})
+
+// Only `a`, `b`, and `p` are allowed, `a` only has `href`, and `href`
+// only allows `https:` URLs (and local URLs).
+console.log(sanitize(tree, schema))
+```
 
 ### `Schema`
 
@@ -466,5 +510,7 @@ abide by its terms.
 [api-default-schema]: #defaultschema
 
 [api-sanitize]: #sanitizetree-options
+
+[api-tighten-schema]: #tightenschemabase-tightening
 
 [api-schema]: #schema
