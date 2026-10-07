@@ -853,7 +853,119 @@ test('`root`', async function (t) {
   )
 })
 
-// Simple value to see if `toString` is called.
+test('protocols schema check', async function (t) {
+  await t.test(
+    'should allow a valid `https` protocol (default schema)',
+    async function () {
+      assert.deepEqual(
+        sanitize(h('a', {href: 'https://example.com'})),
+        h('a', {href: 'https://example.com'})
+      )
+    }
+  )
+
+  await t.test(
+    'should allow a custom `git+ssh` protocol when configured',
+    async function () {
+      const schema = {protocols: {href: ['git+ssh']}}
+
+      assert.deepEqual(
+        sanitize(h('a', {href: 'git+ssh://example.com/repo.git'}), schema),
+        h('a', {href: 'git+ssh://example.com/repo.git'})
+      )
+    }
+  )
+
+  await t.test(
+    'should throw on a protocol with a colon and report the property',
+    async function () {
+      assert.throws(function () {
+        sanitize(h('a', {href: 'https://example.com'}), {
+          protocols: {href: ['https:']}
+        })
+      }, /invalid protocol `https:` in `protocols\.href`/)
+    }
+  )
+
+  await t.test(
+    'should throw on a protocol with whitespace and report the property',
+    async function () {
+      assert.throws(function () {
+        sanitize(h('img', {src: 'https://example.com/x.png'}), {
+          protocols: {src: ['my proto']}
+        })
+      }, /invalid protocol `my proto` in `protocols\.src`/)
+    }
+  )
+
+  await t.test(
+    'should not traverse or change the tree with an invalid schema',
+    async function () {
+      let reads = 0
+      const tree = {
+        get type() {
+          reads++
+          return 'element'
+        },
+        tagName: 'a',
+        properties: {href: 'https://example.com'},
+        children: []
+      }
+
+      assert.throws(function () {
+        // @ts-expect-error: check how an invalid schema is handled.
+        sanitize(tree, {protocols: {href: ['https:']}})
+      }, /invalid protocol `https:` in `protocols\.href`/)
+
+      assert.equal(reads, 0, 'expected no traversal')
+      assert.deepEqual(
+        Object.keys(tree),
+        ['type', 'tagName', 'properties', 'children'],
+        'expected an unchanged tree'
+      )
+    }
+  )
+
+  await t.test(
+    'should look protocols up by exact property casing',
+    async function () {
+      // `HREF` (uppercase) is not `href`: no protocols apply, so even
+      // `javascript:` passes through when the property itself is allowed.
+      // Note: a raw node is used because `h()` normalizes property casing.
+      assert.deepEqual(
+        sanitize(
+          {
+            type: 'element',
+            tagName: 'a',
+            properties: {HREF: 'javascript:alert(1)'},
+            children: []
+          },
+          {
+            attributes: {a: ['HREF']},
+            protocols: {href: ['https']}
+          }
+        ),
+        {
+          type: 'element',
+          tagName: 'a',
+          properties: {HREF: 'javascript:alert(1)'},
+          children: []
+        }
+      )
+    }
+  )
+
+  await t.test(
+    'should still filter dangerous URLs with the default schema (regression)',
+    async function () {
+      assert.deepEqual(sanitize(h('a', {href: 'javascript:alert(1)'})), h('a'))
+      assert.equal(
+        toHtml(sanitize(h('a', {href: 'javascript:alert(1)'}))),
+        '<a></a>'
+      )
+    }
+  )
+})
 // Check.
 function toString() {
   return 'alert(1);'
