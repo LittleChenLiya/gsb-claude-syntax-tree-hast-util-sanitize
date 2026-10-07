@@ -20,6 +20,7 @@
   * [`defaultSchema`](#defaultschema)
   * [`sanitize(tree[, options])`](#sanitizetree-options)
   * [`Schema`](#schema)
+  * [`tightenSchema(base, restriction)`](#tightenschemabase-restriction)
 * [Types](#types)
 * [Compatibility](#compatibility)
 * [Security](#security)
@@ -116,8 +117,9 @@ Safe:
 
 ## API
 
-This package exports the identifiers [`defaultSchema`][api-default-schema] and
-[`sanitize`][api-sanitize].
+This package exports the identifiers [`defaultSchema`][api-default-schema],
+[`sanitize`][api-sanitize],
+and [`tightenSchema`][api-tighten-schema].
 There is no default export.
 
 ### `defaultSchema`
@@ -357,6 +359,56 @@ tagNames: [
 ]
 ```
 
+###### `tighten`
+
+Extra schema (or schemas) to tighten this schema with
+([`Schema`][api-schema] or `Array<Schema>`, default: `undefined`).
+
+Each given schema is combined with this schema through
+[`tightenSchema`][api-tighten-schema]:
+the combination can only *narrow* what is allowed,
+it can never re-allow something that is forbidden.
+When `tighten` is not given, behavior is exactly as before.
+
+For example:
+
+```js
+sanitize(tree, {
+  tighten: {
+    tagNames: ['a', 'b'],
+    protocols: {href: ['https']}
+  }
+})
+```
+
+### `tightenSchema(base, restriction)`
+
+Combine two schemas into a tighter one.
+
+The result only ever *narrows* what `base` allows:
+`restriction` can remove tag names, attributes, attribute values, and
+protocols, but it can never re-allow something that `base` already forbids.
+
+Tag names, attributes, and protocols are intersected.
+Fixed value allow lists (such as `['type', 'checkbox', 'radio']`) are
+intersected value by value.
+`strip` and `clobber` are unioned (dropping more is tighter).
+Conflicts that cannot be expressed as a tighter schema (such as an empty
+intersection of fixed attribute values or protocols) are rejected by
+throwing an error.
+
+###### Parameters
+
+* `base` ([`Schema`][api-schema])
+  — base schema; its allowances are the ceiling
+* `restriction` ([`Schema`][api-schema])
+  — restricting schema; can only narrow `base`
+
+###### Returns
+
+New schema that is the tightening combination of both
+([`Schema`][api-schema]).
+
 ## Types
 
 This package is fully typed with [TypeScript][].
@@ -466,5 +518,7 @@ abide by its terms.
 [api-default-schema]: #defaultschema
 
 [api-sanitize]: #sanitizetree-options
+
+[api-tighten-schema]: #tightenschemabase-restriction
 
 [api-schema]: #schema

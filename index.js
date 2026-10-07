@@ -4,3 +4,4 @@
 
 export {sanitize} from './lib/index.js'
 export {defaultSchema} from './lib/schema.js'
+export {tightenSchema} from './lib/tighten.js'

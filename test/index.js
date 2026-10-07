@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import deepmerge from 'deepmerge'
 import {h, s} from 'hastscript'
-import {defaultSchema, sanitize} from 'hast-util-sanitize'
+import {defaultSchema, sanitize, tightenSchema} from 'hast-util-sanitize'
 import {toHtml} from 'hast-util-to-html'
 import {u} from 'unist-builder'
 
@@ -40,7 +40,8 @@ test('sanitize()', async function (t) {
   await t.test('should expose the public api', async function () {
     assert.deepEqual(Object.keys(await import('hast-util-sanitize')).sort(), [
       'defaultSchema',
-      'sanitize'
+      'sanitize',
+      'tightenSchema'
     ])
   })
 
@@ -895,3 +896,363 @@ function testUrls(tagName, property, urls, valid) {
     }
   }
 }
+
+test('tightenSchema()', async function (t) {
+  await t.test(
+    'should intersect tag names, attributes, and protocols',
+    async function () {
+      /** @type {import('hast-util-sanitize').Schema} */
+      const base = {
+        tagNames: ['a', 'b', 'img'],
+        attributes: {a: ['href', 'title'], img: ['src', 'alt']},
+        protocols: {href: ['http', 'https'], src: ['http', 'https']}
+      }
+      /** @type {import('hast-util-sanitize').Schema} */
+      const restriction = {
+        tagNames: ['a', 'img'],
+        attributes: {a: ['href'], img: ['src']},
+        protocols: {href: ['https'], src: ['https']}
+      }
+
+      const combined = tightenSchema(base, restriction)
+
+      assert.deepEqual(combined.tagNames, ['a', 'img'])
+      assert.deepEqual(combined.attributes, {a: ['href'], img: ['src']})
+      assert.deepEqual(combined.protocols, {href: ['https'], src: ['https']})
+
+      // Dangerous nodes and values are still filtered by the combined schema.
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('b', 'not allowed anymore'),
+              h('a', {href: 'javascript:alert(1)', title: 'x'}, 'link'),
+              h('img', {src: 'https://example.com/x.png', alt: 'y'}),
+              h('script', 'alert(1)')
+            ]),
+            combined
+          )
+        ),
+        '<a>link</a><img src="https://example.com/x.png">',
+        'should filter dangerous nodes and values with the combined schema'
+      )
+    }
+  )
+
+  await t.test(
+    'should not re-allow forbidden tag names, attributes, or protocols',
+    async function () {
+      /** @type {import('hast-util-sanitize').Schema} */
+      const base = {
+        tagNames: ['a'],
+        attributes: {a: ['href']},
+        protocols: {href: ['https']}
+      }
+      /** @type {import('hast-util-sanitize').Schema} */
+      const restriction = {
+        tagNames: ['a', 'script'],
+        attributes: {a: ['href', 'onclick']},
+        protocols: {href: ['https', 'javascript']}
+      }
+
+      const combined = tightenSchema(base, restriction)
+
+      assert.deepEqual(combined.tagNames, ['a'])
+      assert.deepEqual(combined.attributes, {a: ['href']})
+      assert.deepEqual(combined.protocols, {href: ['https']})
+
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('script', 'alert(1)'),
+              h('a', {href: 'javascript:alert(1)', onclick: 'alert(1)'}, 'x')
+            ]),
+            combined
+          )
+        ),
+        '<a>x</a>',
+        'should not re-allow items banned by the base schema'
+      )
+    }
+  )
+
+  await t.test('should intersect fixed attribute values', async function () {
+    /** @type {import('hast-util-sanitize').Schema} */
+    const base = {
+      tagNames: ['input'],
+      attributes: {input: [['type', 'checkbox', 'radio']]}
+    }
+    /** @type {import('hast-util-sanitize').Schema} */
+    const restriction = {
+      tagNames: ['input'],
+      attributes: {input: [['type', 'radio', 'text']]}
+    }
+
+    const combined = tightenSchema(base, restriction)
+
+    assert.deepEqual(combined.attributes, {input: [['type', 'radio']]})
+
+    assert.equal(
+      toHtml(
+        sanitize(
+          u('root', [
+            h('input', {type: 'checkbox'}),
+            h('input', {type: 'radio'}),
+            h('input', {type: 'text'})
+          ]),
+          combined
+        )
+      ),
+      '<input><input type="radio"><input>',
+      'should only allow values allowed by both schemas'
+    )
+  })
+
+  await t.test(
+    'should intersect fixed values with expressions',
+    async function () {
+      /** @type {import('hast-util-sanitize').Schema} */
+      const base = {
+        tagNames: ['span'],
+        attributes: {span: [['className', /^hljs-/]]}
+      }
+      /** @type {import('hast-util-sanitize').Schema} */
+      const restriction = {
+        tagNames: ['span'],
+        attributes: {span: [['className', 'hljs-number', 'other']]}
+      }
+
+      const combined = tightenSchema(base, restriction)
+
+      assert.deepEqual(combined.attributes, {
+        span: [['className', 'hljs-number']]
+      })
+
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('span', {className: ['hljs-number']}, 'a'),
+              h('span', {className: ['hljs-string']}, 'b'),
+              h('span', {className: ['other']}, 'c')
+            ]),
+            combined
+          )
+        ),
+        '<span class="hljs-number">a</span><span class="">b</span><span class="">c</span>',
+        'should keep only primitives matched by the expression'
+      )
+    }
+  )
+
+  await t.test(
+    'should reject an empty fixed value intersection',
+    async function () {
+      /** @type {import('hast-util-sanitize').Schema} */
+      const base = {
+        tagNames: ['input'],
+        attributes: {input: [['type', 'checkbox']]}
+      }
+      /** @type {import('hast-util-sanitize').Schema} */
+      const restriction = {
+        tagNames: ['input'],
+        attributes: {input: [['type', 'text']]}
+      }
+
+      assert.throws(
+        () => tightenSchema(base, restriction),
+        /Cannot tighten schemas: attribute `type` on `input` has no allowed values left/,
+        'should reject a fixed value conflict that cannot be expressed'
+      )
+    }
+  )
+
+  await t.test(
+    'should reject an empty protocol intersection',
+    async function () {
+      /** @type {import('hast-util-sanitize').Schema} */
+      const base = {protocols: {href: ['https']}}
+      /** @type {import('hast-util-sanitize').Schema} */
+      const restriction = {protocols: {href: ['http']}}
+
+      assert.throws(
+        () => tightenSchema(base, restriction),
+        /Cannot tighten schemas: property `href` has no allowed protocols left/,
+        'should reject a protocol conflict that cannot be expressed'
+      )
+    }
+  )
+
+  await t.test('should reject conflicting expressions', async function () {
+    /** @type {import('hast-util-sanitize').Schema} */
+    const base = {
+      tagNames: ['code'],
+      attributes: {code: [['className', /^language-/]]}
+    }
+    /** @type {import('hast-util-sanitize').Schema} */
+    const restriction = {
+      tagNames: ['code'],
+      attributes: {code: [['className', /^hljs-/]]}
+    }
+
+    assert.throws(
+      () => tightenSchema(base, restriction),
+      /Cannot tighten schemas: conflicting expressions/,
+      'should reject two different expressions for one attribute'
+    )
+  })
+
+  await t.test(
+    'should reject conflicting `clobberPrefix` and `required` values',
+    async function () {
+      assert.throws(
+        () => tightenSchema({clobberPrefix: 'a-'}, {clobberPrefix: 'b-'}),
+        /Cannot tighten schemas: conflicting `clobberPrefix` values/,
+        'should reject conflicting clobber prefixes'
+      )
+
+      assert.throws(
+        () =>
+          tightenSchema(
+            {required: {input: {type: 'checkbox'}}},
+            {required: {input: {type: 'radio'}}}
+          ),
+        /Cannot tighten schemas: conflicting required values for `type` on `input`/,
+        'should reject conflicting required values'
+      )
+    }
+  )
+
+  await t.test(
+    'should union `strip` and `clobber`, and keep flags off',
+    async function () {
+      const combined = tightenSchema(
+        {
+          allowComments: true,
+          allowDoctypes: true,
+          strip: ['script'],
+          clobber: ['id']
+        },
+        {
+          allowComments: false,
+          strip: ['style'],
+          clobber: ['name']
+        }
+      )
+
+      assert.equal(combined.allowComments, false, 'should turn a flag off')
+      assert.equal(
+        combined.allowDoctypes,
+        true,
+        'should keep a flag when not mentioned'
+      )
+      assert.deepEqual(combined.strip, ['script', 'style'])
+      assert.deepEqual(combined.clobber, ['id', 'name'])
+
+      assert.equal(
+        tightenSchema({allowComments: false}, {allowComments: true})
+          .allowComments,
+        false,
+        'should not turn a flag back on'
+      )
+    }
+  )
+
+  await t.test(
+    'should support the `tighten` option in `sanitize`',
+    async function () {
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('b', 'gone'),
+              h('a', {href: 'javascript:alert(1)'}, 'js'),
+              h('a', {href: 'https://example.com'}, 'ok')
+            ]),
+            {
+              tighten: {
+                tagNames: ['a'],
+                protocols: {href: ['https']}
+              }
+            }
+          )
+        ),
+        'gone<a>js</a><a href="https://example.com">ok</a>',
+        'should tighten the default schema with the `tighten` option'
+      )
+    }
+  )
+
+  await t.test(
+    'should support a list of schemas in the `tighten` option',
+    async function () {
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('b', 'gone'),
+              h('a', {href: 'http://example.com'}, 'http'),
+              h('a', {href: 'https://example.com'}, 'https')
+            ]),
+            {
+              tighten: [
+                {tagNames: ['a', 'b']},
+                {tagNames: ['a'], protocols: {href: ['https']}}
+              ]
+            }
+          )
+        ),
+        'gone<a>http</a><a href="https://example.com">https</a>',
+        'should apply every given restriction in order'
+      )
+    }
+  )
+
+  await t.test(
+    'should work as before without the `tighten` option',
+    async function () {
+      assert.equal(
+        toHtml(
+          sanitize(
+            u('root', [
+              h('b', 'kept'),
+              h('a', {href: 'https://example.com'}, 'ok')
+            ]),
+            defaultSchema
+          )
+        ),
+        '<b>kept</b><a href="https://example.com">ok</a>',
+        'should not change behavior when `tighten` is not given'
+      )
+    }
+  )
+
+  await t.test('should not mutate the given schemas', async function () {
+    /** @type {import('hast-util-sanitize').Schema} */
+    const base = {
+      tagNames: ['a', 'b'],
+      attributes: {a: ['href', 'title']},
+      protocols: {href: ['http', 'https']}
+    }
+    /** @type {import('hast-util-sanitize').Schema} */
+    const restriction = {
+      tagNames: ['a'],
+      attributes: {a: ['href']},
+      protocols: {href: ['https']}
+    }
+
+    tightenSchema(base, restriction)
+
+    assert.deepEqual(base, {
+      tagNames: ['a', 'b'],
+      attributes: {a: ['href', 'title']},
+      protocols: {href: ['http', 'https']}
+    })
+    assert.deepEqual(restriction, {
+      tagNames: ['a'],
+      attributes: {a: ['href']},
+      protocols: {href: ['https']}
+    })
+  })
+})
