@@ -304,6 +304,14 @@ protocols: {
 }
 ```
 
+Protocol names are matched against the part of a URL before its first colon,
+so they cannot contain colons or whitespace themselves.
+The schema is checked before the tree is walked: an invalid protocol makes
+`sanitize` throw, reporting the property name the protocol was configured
+for, and no node is traversed or changed.
+Properties are looked up by their exact (case-sensitive) name, so `longDesc`
+and `longdesc` are different keys.
+
 ###### `required`
 
 Map of tag names to required [*property names*][name] with a default value

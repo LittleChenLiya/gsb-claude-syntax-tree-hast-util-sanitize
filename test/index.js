@@ -523,6 +523,137 @@ test('`element`', async function (t) {
     assert.deepEqual(sanitize(h('li', 'alert(1)')), h('li', 'alert(1)'))
   })
 
+  await t.test('protocols precheck', async function (t) {
+    await t.test(
+      'should allow a valid `https` protocol (default schema)',
+      async function () {
+        assert.deepEqual(
+          sanitize(h('a', {href: 'https://example.com'})),
+          h('a', {href: 'https://example.com'})
+        )
+      }
+    )
+
+    await t.test(
+      'should support a custom `git+ssh` protocol',
+      async function () {
+        const schema = deepmerge(defaultSchema, {
+          protocols: {href: ['git+ssh']}
+        })
+
+        assert.deepEqual(
+          sanitize(h('a', {href: 'git+ssh://example.com/repo.git'}), schema),
+          h('a', {href: 'git+ssh://example.com/repo.git'})
+        )
+
+        // Unknown protocols are still filtered with the custom schema.
+        assert.deepEqual(
+          sanitize(h('a', {href: 'javascript:alert(1)'}), schema),
+          h('a')
+        )
+      }
+    )
+
+    await t.test(
+      'should throw on a protocol with a colon and report the property',
+      async function () {
+        assert.throws(function () {
+          sanitize(h('a', {href: 'https://example.com'}), {
+            protocols: {href: ['http:']}
+          })
+        }, /Cannot sanitize: invalid protocol `http:` for property `href` in `schema\.protocols`/)
+      }
+    )
+
+    await t.test(
+      'should throw on a protocol with whitespace and report the property',
+      async function () {
+        assert.throws(function () {
+          sanitize(h('img', {src: 'https://example.com'}), {
+            protocols: {src: ['java script']}
+          })
+        }, /Cannot sanitize: invalid protocol `java script` for property `src` in `schema\.protocols`/)
+      }
+    )
+
+    await t.test(
+      'should not traverse or change the tree for an invalid schema',
+      async function () {
+        let accesses = 0
+        const tree = {
+          get type() {
+            accesses++
+            return 'element'
+          },
+          get tagName() {
+            accesses++
+            return 'a'
+          },
+          get properties() {
+            accesses++
+            return {href: 'https://example.com'}
+          },
+          get children() {
+            accesses++
+            return []
+          }
+        }
+        const input = h('a', {href: 'https://example.com'})
+        const before = JSON.parse(JSON.stringify(input))
+
+        assert.throws(function () {
+          // @ts-expect-error: check how an invalid schema is handled.
+          sanitize(tree, {protocols: {href: ['http:']}})
+        }, /Cannot sanitize: invalid protocol/)
+        assert.equal(accesses, 0, 'expected zero node accesses (no traversal)')
+
+        assert.throws(function () {
+          sanitize(input, {protocols: {href: ['http:']}})
+        }, /Cannot sanitize: invalid protocol/)
+        assert.deepEqual(
+          input,
+          before,
+          'expected the input tree to be unchanged'
+        )
+      }
+    )
+
+    await t.test(
+      'should look up protocol properties by exact case',
+      async function () {
+        // The actual property name is `longDesc` (camelCase): a lowercase
+        // `longdesc` key in `protocols` does not match it.
+        const lowercase = {...defaultSchema, protocols: {longdesc: ['https']}}
+        const exact = {...defaultSchema, protocols: {longDesc: ['https']}}
+
+        assert.deepEqual(
+          sanitize(h('img', {longDesc: 'javascript:alert(1)'}), lowercase),
+          h('img', {longDesc: 'javascript:alert(1)'}),
+          'expected `longdesc` not to restrict `longDesc`'
+        )
+        assert.deepEqual(
+          sanitize(h('img', {longDesc: 'javascript:alert(1)'}), exact),
+          h('img'),
+          'expected `longDesc` to restrict `longDesc`'
+        )
+      }
+    )
+
+    await t.test(
+      'should still filter dangerous URLs by default (regression)',
+      async function () {
+        assert.deepEqual(
+          sanitize(h('a', {href: 'javascript:alert(1)'})),
+          h('a')
+        )
+        assert.deepEqual(
+          sanitize(h('img', {src: 'data:,evilnastystuff'})),
+          h('img')
+        )
+      }
+    )
+  })
+
   await t.test('should allow `li` in `ol`', async function () {
     assert.deepEqual(
       sanitize(h('ol', h('li', 'alert(1)'))),
